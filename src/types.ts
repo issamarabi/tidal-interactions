@@ -97,6 +97,20 @@ export interface RemoveCommentReactionResponse {
   deleted: boolean
 }
 
+// --- remove-reply-reaction ---
+export interface RemoveReplyReactionPayload {
+  tidal_user_id: string
+  comment_id: string
+  emoji: string
+}
+
+export interface RemoveReplyReactionResponse {
+  tidal_user_id: string
+  comment_id: string
+  emoji: string
+  deleted: boolean
+}
+
 // --- remove-song-reaction ---
 export interface RemoveSongReactionPayload {
   id: string
