@@ -1,4 +1,4 @@
-#tidal-interactions
+**tidal-interactions**
 A dynamic social layer where users can post timestamped comments and reactions on any song.
 Supports likes, threaded replies, emoji reactions, sorting by engagement, and real-time listening party mode.
 
