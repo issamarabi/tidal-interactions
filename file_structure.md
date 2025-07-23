@@ -17,12 +17,15 @@ tidal-comments-backend/
                 ├── get-thread.ts         # Get comment thread/replies and reaction, given a user id, 
             ├── add.ts  
                 ├── add-comment.ts        # Add new comment, given a user id, track id, timestamp
+                ├── add-reply.ts        # Add new reply, given a user id, track id, timestamp, parent comment
                 ├── add-song-reaction.ts       # Add new reaction to a song, given a user id, track id, timestamp
                 ├── add-comment-reaction.ts    # Add new reaction to a comment, given a user id, track id, timestamp 
             ├── remove.ts  
                 ├── remove-reply
-                ├── remove-reaction
+                ├── remove-song-reaction
                 ├── remove-comment.ts 
+                ├── remove-comment-reaction.ts 
+                
             └──       
 │   │   │
 │   │   └── auth/                     # Authentication Functions
