@@ -31,19 +31,33 @@ The backend is organized as Supabase Edge Functions, each providing a single-res
 
 Key Endpoints
 POST /comments-add-comment — Add a comment to a song at a timestamp
+
 POST /comments-add-reply — Reply to a comment (threaded)
+
 PATCH /edit-comment — Edit an existing comment
+
 PATCH /edit-reply — Edit an existing reply
+
 POST /comments-add-comment-reaction — Add a reaction (emoji) to a comment
+
 POST /comments-add-reply-reaction — Add a reaction (emoji) to a reply
+
 POST /comments-get-thread — Fetch all comments/replies/reactions for a song, with flexible sorting
+
 POST /comments-remove-comment — Delete a comment
+
 POST /comments-remove-reply — Delete a reply
+
 POST /comments-remove-comment-reaction — Remove a comment reaction
+
 POST /comments-get-song-reactions — Fetch song-global emoji reactions
+
 POST /comments-add-song-reaction — Add a song-global emoji reaction
+
 POST /comments-remove-song-reaction — Remove a song-global emoji reaction
+
 See /supabase/functions for detailed endpoints, input/output contracts, and error codes.
+
 Each function is accompanied by a Typescript wrapper for easy frontend calls.
 
 # 🖼️ User Avatars
