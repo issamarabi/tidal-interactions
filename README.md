@@ -30,6 +30,7 @@ Precise SQL schema is included in /supabase/migrations, see the repo for details
 The backend is organized as Supabase Edge Functions, each providing a single-responsibility API endpoint. Most functions require an Authorization: Bearer header with a valid Supabase key (typically handled by Supabase Auth).
 
 Key Endpoints
+
 POST /comments-add-comment — Add a comment to a song at a timestamp
 
 POST /comments-add-reply — Reply to a comment (threaded)
