@@ -1,15 +1,15 @@
-**tidal-interactions**
+# **tidal-interactions**
 A dynamic social layer where users can post timestamped comments and reactions on any song.
 Supports likes, threaded replies, emoji reactions, sorting by engagement, and real-time listening party mode.
 
-🚀 Overview
+# 🚀 Overview
 tidal-interactions adds a real-time community conversation and reaction experience for music listeners.
 Users can leave timestamped comments, react with emoji, and reply to each other on any song. Comments and threads can be sorted by engagement, recency, or reply count.
 There is also an optional “live stream mode,” allowing comments to appear as the song progresses – for a shared listening party feel.
 
 This project uses Supabase as the backend, including its powerful PostgreSQL database, Edge Functions, and Storage Buckets for user avatars.
 
-🏗️ Tech Stack
+# 🏗️ Tech Stack
 Frontend: TypeScript (framework not specified)
 Backend: Supabase (Postgres + Edge Functions)
 Authentication: Supabase Auth (assumed, see Auth section)
@@ -17,7 +17,7 @@ Storage: Avatars managed using Supabase Storage buckets
 📖 Database Schema
 The core tables include:
 
-Table	Purpose
+# Table	Purpose
 users	Stores each user's Tidal-style ID and avatar URL
 comments	Timestamped comments per song, includes author and location in song
 comment_replies	Threaded replies to comments
@@ -26,7 +26,7 @@ reply_reactions	Emoji reactions applied to replies
 reactions	Song-global emoji reactions (not tied to any comment)
 Precise SQL schema is included in /supabase/migrations, see the repo for details.
 
-⚡️ Backend Functions
+# ⚡️ Backend Functions
 The backend is organized as Supabase Edge Functions, each providing a single-responsibility API endpoint. Most functions require an Authorization: Bearer header with a valid Supabase key (typically handled by Supabase Auth).
 
 Key Endpoints
@@ -46,11 +46,11 @@ POST /comments-remove-song-reaction — Remove a song-global emoji reaction
 See /supabase/functions for detailed endpoints, input/output contracts, and error codes.
 Each function is accompanied by a Typescript wrapper for easy frontend calls.
 
-🖼️ User Avatars
+# 🖼️ User Avatars
 User avatars are public URLs stored in a Supabase Storage bucket.
 Each users record contains a tidal_user_id and a corresponding avatar_url linking to their avatar image.
 
-🔐 Authentication
+# 🔐 Authentication
 Supabase Auth is assumed.
 User sessions, login, and tokens are managed through Supabase.
 Most API calls require a valid Supabase JWT (as an Authorization: Bearer header).
@@ -71,7 +71,7 @@ Remove or edit your comment/reaction
 To populate test users with avatars:
 
 
--- Example:
+# -- Example:
 INSERT INTO public.users (tidal_user_id, avatar_url) VALUES
   ('tidal_ernie', 'https://your-bucket.supabase.co/.../ernie.png'),
   ('tidal_hs_elmo', 'https://your-bucket.supabase.co/.../elmo.png');
@@ -86,18 +86,18 @@ Earliest
 (Set with "sort_by" in the request body.)
 “Live” mode (planned/optional):
 Fetch comments in real-time as a song is played, for synchronous group listening.
-🧪 Testing
+# 🧪 Testing
 You can test endpoints with curl or Postman (Authorization: Bearer ... required).
 Each function is self-documented for required input/output.
 See migration and insert scripts for sample data.
-📝 Contributing
+# 📝 Contributing
 Please open issues or pull requests if you encounter bugs, want to suggest an improvement, or add new features!
 See CONTRIBUTING.md for details (if available).
 All code should use Prettier formatting and TypeScript best practices.
-📃 License
+# 📃 License
 Choose a license: MIT, Apache, or similar. (Fill in before publishing.)
 
-🙋 Frequently Asked Questions
+# 🙋 Frequently Asked Questions
 How do I get started with development?
 
 Clone this repository; set up a Supabase project; run all migrations in /supabase/migrations; deploy edge functions via the Supabase CLI.
@@ -110,7 +110,7 @@ Yes, delete endpoints exist for both comments, replies, and reactions. Add admin
 Does it work on mobile?
 
 Depends on your frontend, which is not covered in this README.
-📂 Directory Structure
+# 📂 Directory Structure
 
 tidal-interactions/
   supabase/
