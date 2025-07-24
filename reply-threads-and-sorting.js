@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         TIDAL Social Comments (Native UI - Full Features)
 // @namespace    http://tampermonkey.net/
-// @version      6.0
-// @description  A social comments overlay for TIDAL with sorting and nested replies, perfectly mimicking the native Play Queue UI.
+// @version      6.1
+// @description  A social comments overlay for TIDAL with sorting and nested replies (1-level), perfectly mimicking the native Play Queue UI.
 // @author       Social Overlay Team (Merged Implementation)
 // @match        https://*.tidal.com/*
 // @icon         https://tidal.com/favicon.ico
@@ -46,7 +46,7 @@
         }
         .social-header-controls { display: flex; align-items: center; gap: 8px; }
         .social-sort-select {
-            background: var(--wave-color-background-base-secondary); 
+            background: var(--wave-color-background-base-secondary);
             color: var(--wave-color-text-primary); border: 1px solid var(--wave-color-border-primary);
             border-radius: 4px; padding: 4px 8px; font-size: 12px;
         }
@@ -87,8 +87,8 @@
             color: var(--wave-color-text-primary);
         }
         .social-action-button.liked { color: var(--wave-color-solid-primary-base); }
-        .social-action-button.reply-btn { 
-            font-size: 12px; font-weight: 600; padding: 4px 8px; border-radius: 4px; 
+        .social-action-button.reply-btn {
+            font-size: 12px; font-weight: 600; padding: 4px 8px; border-radius: 4px;
         }
 
         /* Reply styles */
@@ -107,9 +107,9 @@
         #replying-to-indicator {
             padding: 0px 16px 8px; color: var(--wave-color-text-secondary); font-size: 12px;
         }
-        #cancel-reply-btn { 
-            background: none; border: none; color: var(--wave-color-text-tertiary); 
-            margin-left: 8px; cursor: pointer; 
+        #cancel-reply-btn {
+            background: none; border: none; color: var(--wave-color-text-tertiary);
+            margin-left: 8px; cursor: pointer;
         }
         .social-input-wrapper {
             display: flex; gap: 12px; align-items: flex-start;
@@ -137,8 +137,8 @@
             color: var(--wave-color-solid-primary-base);
             background-color: var(--wave-color-interactive-primary-hover-solid);
         }
-        .social-comments-button:not(.active):hover { 
-            background-color: var(--wave-color-interactive-primary-hover-solid); 
+        .social-comments-button:not(.active):hover {
+            background-color: var(--wave-color-interactive-primary-hover-solid);
         }
 
         /* State placeholders */
@@ -152,9 +152,9 @@
     // --- STATE MANAGEMENT (MERGED) ---
     let state = {
         isOpen: false, comments: [], loading: true, trackId: null, currentTime: 0,
-        sortMode: 'most_engagement', // From sorting script
-        lastFetchedSecond: -1, // From sorting script
-        replyingTo: null, // From reply script - { id: commentId, name: userName }
+        sortMode: 'most_engagement',
+        lastFetchedSecond: -1,
+        replyingTo: null, // { id: commentId, name: userName }
         userId: GM_getValue('social-overlay-user-id') || `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     };
     GM_setValue('social-overlay-user-id', state.userId);
@@ -194,7 +194,6 @@
         replies: (comment.replies || []).map(mapCommentData),
     });
 
-    // MERGED: fetchComments with both sorting and reply support
     async function fetchComments(options = {}) {
         const { mode = 'full', threadStartsAt = null } = options;
 
@@ -207,10 +206,9 @@
 
         const payload = {
             track_id: state.trackId,
-            sort_by: state.sortMode, // Always send sort mode
+            sort_by: state.sortMode,
         };
 
-        // Add timestamp filtering for live timestamp mode
         if (state.sortMode === 'timestamp') {
             payload.thread_starts_at_seconds = (threadStartsAt !== null) ? threadStartsAt : Math.floor(state.currentTime);
         }
@@ -250,19 +248,16 @@
         sendButton.disabled = true;
 
         const isReply = parentId !== null;
-        
         let endpoint, payload;
-        
+
         if (isReply) {
-            // Use add-reply endpoint for replies
             endpoint = 'add-reply';
             payload = {
                 tidal_user_id: state.userId,
-                parent_comment_id: parentId,  // UUID of the comment being replied to
-                body: content                 // reply text (no timestamp needed for replies)
+                parent_comment_id: parentId,
+                body: content
             };
         } else {
-            // Use add-comment endpoint for top-level comments
             endpoint = 'add-comment';
             payload = {
                 tidal_user_id: state.userId,
@@ -299,12 +294,10 @@
     }
 
     async function toggleLike(commentId) {
-        // Find comment in main list or replies
         let comment = state.comments.find(c => c.id == commentId);
         let isReply = false;
-        
+
         if (!comment) {
-            // Search in replies
             for (const parent of state.comments) {
                 comment = parent.replies.find(r => r.id == commentId);
                 if (comment) {
@@ -316,29 +309,15 @@
         if (!comment) return;
 
         const currentlyLiked = comment.user_liked;
-        
-        // Determine which endpoints to use based on whether it's a reply
-        let addEndpoint, removeEndpoint;
-        if (isReply) {
-            addEndpoint = 'add-reply-reaction';
-            removeEndpoint = 'remove-reply-reaction'; // Assuming this exists
-        } else {
-            addEndpoint = 'add-comment-reaction';
-            removeEndpoint = 'remove-comment-reaction';
-        }
+        let addEndpoint = isReply ? 'add-reply-reaction' : 'add-comment-reaction';
+        let removeEndpoint = isReply ? 'remove-reply-reaction' : 'remove-comment-reaction';
 
-        // Optimistic UI update
         comment.user_liked = !currentlyLiked;
         comment.likes_count += currentlyLiked ? -1 : 1;
         renderComment(comment);
 
         try {
-            const payload = {
-                tidal_user_id: state.userId,
-                comment_id: commentId,
-                emoji: LIKE_EMOJI
-            };
-
+            const payload = { tidal_user_id: state.userId, comment_id: commentId, emoji: LIKE_EMOJI };
             const endpoint = currentlyLiked ? removeEndpoint : addEndpoint;
 
             await new Promise((resolve, reject) => {
@@ -347,22 +326,12 @@
                     url: `${SUPABASE_URL}/functions/v1/${endpoint}`,
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
                     data: JSON.stringify(payload),
-                    onload: res => {
-                        // Success status codes
-                        if (currentlyLiked) {
-                            // Removing reaction: 200 OK or 404 (already gone) are both success
-                            (res.status === 200 || res.status === 404) ? resolve(res) : reject(res);
-                        } else {
-                            // Adding reaction: 201 Created or 409 (already exists) are both success
-                            (res.status === 201 || res.status === 409) ? resolve(res) : reject(res);
-                        }
-                    },
+                    onload: res => ((res.status >= 200 && res.status < 300) || res.status === 409 || res.status === 404) ? resolve(res) : reject(res),
                     onerror: reject
                 });
             });
         } catch (error) {
             console.error(`Error toggling like on ${isReply ? 'reply' : 'comment'}:`, error);
-            // Revert on failure
             comment.user_liked = currentlyLiked;
             comment.likes_count += currentlyLiked ? 1 : -1;
             renderComment(comment);
@@ -406,21 +375,22 @@
         document.body.appendChild(el);
         el.addEventListener('click', handleSidebarClick);
         const input = el.querySelector('.social-input-field');
-        input.addEventListener('input', () => { 
-            el.querySelector('.social-send-btn').disabled = !input.value.trim(); 
-            input.style.height = 'auto'; 
-            input.style.height = `${input.scrollHeight}px`; 
+        input.addEventListener('input', () => {
+            el.querySelector('.social-send-btn').disabled = !input.value.trim();
+            input.style.height = 'auto';
+            input.style.height = `${input.scrollHeight}px`;
         });
-        input.addEventListener('keydown', (e) => { 
-            if (e.key === 'Enter' && !e.shiftKey) { 
-                e.preventDefault(); 
-                sendButton.click(); 
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendButton.click();
             }
         });
         return el;
     }
 
-    function createCommentElement(comment) {
+    // MODIFICATION: Added `isReply` parameter to conditionally render the Reply button.
+    function createCommentElement(comment, isReply = false) {
         const item = document.createElement('div');
         item.className = 'social-comment-item';
         item.dataset.id = comment.id;
@@ -442,13 +412,14 @@
                         <svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"></path></svg>
                         <span style="font-size: 12px; margin-left: 4px;">${comment.likes_count > 0 ? comment.likes_count : ''}</span>
                     </button>
-                    <button class="social-action-button reply-btn" data-action="reply" data-id="${comment.id}" data-name="${comment.user_name}">Reply</button>
+                    ${!isReply ? `<button class="social-action-button reply-btn" data-action="reply" data-id="${comment.id}" data-name="${comment.user_name}">Reply</button>` : ''}
                 </div>
                 <div class="social-replies-container"></div>
             </div>`;
         return item;
     }
 
+    // MODIFICATION: Pass the `isReply` flag to `createCommentElement`.
     function render() {
         if (!commentsSidebar) return;
         commentsSidebar.classList.toggle('_containerIsOpen_5f53707', state.isOpen);
@@ -468,21 +439,35 @@
 
         commentsList.innerHTML = '';
         state.comments.forEach(comment => {
-            const commentEl = createCommentElement(comment);
+            const commentEl = createCommentElement(comment, false); // Top-level comments are not replies
             if (comment.replies && comment.replies.length > 0) {
                 const repliesContainer = commentEl.querySelector('.social-replies-container');
                 comment.replies.forEach(reply => {
-                    repliesContainer.appendChild(createCommentElement(reply));
+                    repliesContainer.appendChild(createCommentElement(reply, true)); // Nested items are replies
                 });
             }
             commentsList.appendChild(commentEl);
         });
     }
 
+    // MODIFICATION: Detect if the comment is a reply before re-rendering.
     function renderComment(comment) {
         const el = commentsList.querySelector(`.social-comment-item[data-id="${comment.id}"]`);
-        if (el) el.replaceWith(createCommentElement(comment));
+        if (el) {
+            const isReply = !!el.closest('.social-replies-container');
+            const newEl = createCommentElement(comment, isReply);
+            el.replaceWith(newEl);
+
+            // Re-render replies if the parent comment is the one being updated
+            if (!isReply && comment.replies && comment.replies.length > 0) {
+                 const repliesContainer = newEl.querySelector('.social-replies-container');
+                 comment.replies.forEach(reply => {
+                    repliesContainer.appendChild(createCommentElement(reply, true));
+                });
+            }
+        }
     }
+
 
     // --- EVENT HANDLERS (MERGED) ---
     function cancelReply() {
@@ -562,7 +547,6 @@
         sendButton = commentsSidebar.querySelector('.social-send-btn');
         replyingIndicator = commentsSidebar.querySelector('#replying-to-indicator');
 
-        // Add sort dropdown event listener
         const sortDropdown = document.getElementById('social-sort-mode');
         if (sortDropdown) {
             sortDropdown.value = state.sortMode;
@@ -582,24 +566,16 @@
     }
 
     // --- TRACKING & POLLING (MERGED) ---
-    // Needs revising it's not the greatest atm, very janky refreshing. If make it interrupt based it will look better visually
     let lastTrackId = null;
     setInterval(() => {
         if (!document.querySelector('.social-comments-button')) init();
-
-        // Update current time regardless of mode
         state.currentTime = document.querySelector('audio, video')?.currentTime || 0;
 
-        // Real-time fetching for "Live Timestamp" mode
         const currentSecond = Math.floor(state.currentTime);
         if (state.isOpen && state.trackId && state.sortMode === 'timestamp' && currentSecond !== state.lastFetchedSecond) {
             state.lastFetchedSecond = currentSecond;
-            // We don't need to show a big loading spinner for these rapid updates.
-            // The fetch will just replace the content when it arrives.
             fetchComments({ threadStartsAt: currentSecond });
         }
-        // Check if the track ID has changed
-        // Polling for track changes (less frequent)
         const urlMatch = window.location.pathname.match(/track\/(\d+)/);
         const newTrackId = urlMatch ? urlMatch[1] : null;
         if (newTrackId !== lastTrackId) {
@@ -607,29 +583,22 @@
             state.trackId = newTrackId;
             state.loading = true;
             state.comments = [];
-            state.lastFetchedSecond = -1; // Reset for the new track
-            if (state.replyingTo) cancelReply(); // Cancel any active reply when track changes
+            state.lastFetchedSecond = -1;
+            if (state.replyingTo) cancelReply();
             if (state.isOpen) {
-                // Fetch using the currently selected sort mode.
                 fetchComments({ mode: 'full' });
             } else {
                 render();
             }
         }
-    }, 250); // Poll more frequently (4 times a second) for smoother timestamp updates.
+    }, 250);
 
-    // NOTE: THIS IS TYPICAL POLLING FOR UPDATING THE COMMENTS LIST; GOTTA CHANGE THIS GUY TO REFLECT INTERRUPT BASED SO IT'S LESS JANKY
-    // OR SOME OTHER SIMILAR SOLUTION
-    // Additional polling for new comments when panel is open (from reply script)
     setInterval(() => {
         if (state.isOpen && state.trackId && !state.loading && state.sortMode !== 'timestamp') {
-            // Only poll for new comments if we're not in live timestamp mode
-            // (timestamp mode already handles its own updates)
             fetchComments({ mode: 'poll' });
         }
     }, 5000);
 
-    // Initial setup observer to detect when TIDAL UI is ready
     const observer = new MutationObserver(() => {
         if (document.querySelector('._moreContainer_f6162c8, [data-test="player-controls-right"]')) {
             init();
