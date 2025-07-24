@@ -147,6 +147,14 @@
             height: 100%; color: var(--wave-color-text-tertiary); text-align: center; gap: 8px;
         }
         .social-state-icon { font-size: 32px; opacity: 0.5; }
+
+        // Stuff for comment / reply deletion
+        .social-action-button.delete-btn { 
+        color: var(--wave-color-text-tertiary);
+        }
+        .social-action-button.delete-btn:hover { 
+        color: #ff4444; /* Red color on hover */
+        }
     `);
 
     // --- STATE MANAGEMENT (MERGED) ---
@@ -243,6 +251,7 @@
         });
     }
 
+    // Add comment function (also handles replies)
     async function postComment(content, parentId = null) {
         if (!state.trackId || !content) return;
         sendButton.disabled = true;
@@ -292,6 +301,114 @@
             }
         });
     }
+
+    // Delete comment function (also handles replies)
+    async function deleteComment(commentId) {
+    if (!commentId) return;
+
+    // Find if it's a comment or reply to determine which endpoint to use
+    let comment = state.comments.find(c => c.id == commentId);
+    let isReply = false;
+    
+    if (!comment) {
+        // Search in replies
+        for (const parent of state.comments) {
+            comment = parent.replies.find(r => r.id == commentId);
+            if (comment) {
+                isReply = true;
+                break;
+            }
+        }
+    }
+    
+    if (!comment) {
+        console.error('Comment not found for deletion');
+        return;
+    }
+
+    // Confirm deletion
+    const itemType = isReply ? 'reply' : 'comment';
+    if (!confirm(`Are you sure you want to delete this ${itemType}?`)) {
+        return;
+    }
+
+    // Determine endpoint based on type
+    const endpoint = isReply ? 'remove-reply' : 'remove-comment';
+    
+    const payload = {
+        id: commentId
+    };
+
+    // Optimistic UI update - remove from state immediately
+    if (isReply) {
+        // Remove reply from parent's replies array
+        for (const parent of state.comments) {
+            const replyIndex = parent.replies.findIndex(r => r.id == commentId);
+            if (replyIndex !== -1) {
+                parent.replies.splice(replyIndex, 1);
+                break;
+            }
+        }
+    } else {
+        // Remove top-level comment
+        const commentIndex = state.comments.findIndex(c => c.id == commentId);
+        if (commentIndex !== -1) {
+            state.comments.splice(commentIndex, 1);
+        }
+    }
+    
+    // Re-render immediately for responsive UI
+    render();
+
+    try {
+        await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `${SUPABASE_URL}/functions/v1/${endpoint}`,
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+                data: JSON.stringify(payload),
+                onload: function(response) {
+                    if (response.status === 200) {
+                        const result = JSON.parse(response.responseText);
+                        console.log(`${itemType} deleted successfully:`, result);
+                        // Refresh comments to ensure consistency
+                        fetchComments({ mode: 'poll' });
+                        resolve(response);
+                    } else {
+                        const errorResponse = JSON.parse(response.responseText || '{}');
+                        console.error(`Failed to delete ${itemType}:`, response.status, errorResponse.error);
+                        reject(new Error(errorResponse.error || `Could not delete ${itemType}`));
+                    }
+                },
+                onerror: function(error) {
+                    console.error(`Network error while deleting ${itemType}:`, error);
+                    reject(error);
+                }
+            });
+        });
+    } catch (error) {
+        // Revert optimistic update on failure
+        console.error(`Error deleting ${itemType}:`, error);
+        alert(`Error: Could not delete ${itemType}. ${error.message || 'Please try again.'}`);
+        
+        // Restore the comment/reply to the state
+        if (isReply) {
+            // Find parent and restore reply
+            for (const parent of state.comments) {
+                if (parent.replies.some(r => r.id === comment.parent_id)) {
+                    parent.replies.push(comment);
+                    break;
+                }
+            }
+        } else {
+            // Restore top-level comment
+            state.comments.push(comment);
+        }
+        
+        // Re-render to show restored item
+        render();
+    }
+}
 
     async function toggleLike(commentId) {
         let comment = state.comments.find(c => c.id == commentId);
@@ -390,7 +507,9 @@
     }
 
     // MODIFICATION: Added `isReply` parameter to conditionally render the Reply button.
-    function createCommentElement(comment, isReply = false) {
+    // MODIFICATION: added a delete button
+    // MODIFICATION: prevent replies to replies
+    function createCommentElement(comment, isReply = false) {  // ← Add isReply parameter
         const item = document.createElement('div');
         item.className = 'social-comment-item';
         item.dataset.id = comment.id;
@@ -413,6 +532,9 @@
                         <span style="font-size: 12px; margin-left: 4px;">${comment.likes_count > 0 ? comment.likes_count : ''}</span>
                     </button>
                     ${!isReply ? `<button class="social-action-button reply-btn" data-action="reply" data-id="${comment.id}" data-name="${comment.user_name}">Reply</button>` : ''}
+                    ${comment.user_id === state.userId ? `<button class="social-action-button delete-btn" data-action="delete" data-id="${comment.id}" title="Delete">
+                        <svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                    </button>` : ''}
                 </div>
                 <div class="social-replies-container"></div>
             </div>`;
@@ -439,11 +561,11 @@
 
         commentsList.innerHTML = '';
         state.comments.forEach(comment => {
-            const commentEl = createCommentElement(comment, false); // Top-level comments are not replies
+            const commentEl = createCommentElement(comment, false); // ← Pass false for top-level comments
             if (comment.replies && comment.replies.length > 0) {
                 const repliesContainer = commentEl.querySelector('.social-replies-container');
                 comment.replies.forEach(reply => {
-                    repliesContainer.appendChild(createCommentElement(reply, true)); // Nested items are replies
+                    repliesContainer.appendChild(createCommentElement(reply, true)); // ← Pass true for replies
                 });
             }
             commentsList.appendChild(commentEl);
@@ -454,15 +576,15 @@
     function renderComment(comment) {
         const el = commentsList.querySelector(`.social-comment-item[data-id="${comment.id}"]`);
         if (el) {
-            const isReply = !!el.closest('.social-replies-container');
-            const newEl = createCommentElement(comment, isReply);
+            const isReply = !!el.closest('.social-replies-container'); // ← Detect if it's a reply
+            const newEl = createCommentElement(comment, isReply); // ← Pass the isReply flag
             el.replaceWith(newEl);
 
             // Re-render replies if the parent comment is the one being updated
             if (!isReply && comment.replies && comment.replies.length > 0) {
-                 const repliesContainer = newEl.querySelector('.social-replies-container');
-                 comment.replies.forEach(reply => {
-                    repliesContainer.appendChild(createCommentElement(reply, true));
+                const repliesContainer = newEl.querySelector('.social-replies-container');
+                comment.replies.forEach(reply => {
+                    repliesContainer.appendChild(createCommentElement(reply, true)); // ← Pass true for replies
                 });
             }
         }
@@ -507,6 +629,9 @@
                 break;
             case 'cancel-reply':
                 cancelReply();
+                break;
+            case 'delete':  // NEW: Handle delete action
+                deleteComment(id);
                 break;
         }
     }
