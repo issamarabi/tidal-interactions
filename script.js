@@ -1,3 +1,13 @@
+// Stuff this guy does differently than the last script: 
+// 1. Implemented postComment using add-comment from the Edge Functions (backend)
+// 2. Implemented fetchComments using get-thread from the Edge Functions (backend)
+// 3. Implemented toggleLike using add-comment-reaction and remove-comment-reaction from the Edge Functions (backend)
+// there's some specifics there with hardlocking the comment reactions to the like emoji, but that's fine and can keep existing schema for 
+// more reactions when do song-reaction UI implementation
+// Note: ATM UI needs to be updated to implement replies (nested to comments); relevant information being returned, but not used
+// Note: ATM UI needs to be updated to have some sort of sorting menu selection; then, just need to pass the corresponding argument to the backend call and it'll work (using default argument currently, which sorts by # of reactions, replies)
+
+
 // ==UserScript==
 // @name         TIDAL Social Comments (Native UI)
 // @namespace    http://tampermonkey.net/
@@ -163,6 +173,31 @@
         return `${Math.floor(diff / 86400)}d`;
     }
 
+      // NEW HELPER FUNCTION TO MAKE USER IDs READABLE
+    //function formatUserId(id) {
+      // if (!id || !id.includes('-')) return 'User';
+        //const parts = id.split('-');
+        //return `User-${parts[parts.length - 1].substring(0, 5)}`;
+    //}
+
+    // Better helper function that should ideally not treat user names badly
+    function formatUserId(id) {
+      // 1. Handle the case of a truly empty ID.
+      if (!id) {
+          return 'User';
+      }
+
+      // 2. If it's a long, generated ID, shorten it.
+      if (id.includes('-')) {
+          const parts = id.split('-');
+          return `User-${parts[parts.length - 1].substring(0, 5)}`;
+      }
+
+      // 3. If it's a simple ID like "bob", just capitalize and use it.
+      // This makes it much more flexible.
+      return id.charAt(0).toUpperCase() + id.slice(1);
+  }
+
     // --- SUPABASE API ---
     const supabaseRequest = (method, endpoint, data = null) => {
         return new Promise((resolve, reject) => {
@@ -183,57 +218,194 @@
     // --- CORE LOGIC ---
     async function fetchComments(mode = 'full') {
         if (!state.trackId) {
-            state.comments = []; state.loading = false; render(); return;
-        }
-        try {
-            let query = `comments?track_id=eq.${state.trackId}&select=*,likes(user_id)&order=created_at.desc`;
-            if (mode === 'poll' && state.comments.length > 0) {
-                query += `&created_at=gt.${state.comments[0].created_at}`;
-            }
-            const newComments = await supabaseRequest('GET', query);
-            newComments.forEach(c => {
-                c.user_liked = c.likes.some(like => like.user_id === state.userId);
-                c.likes_count = c.likes.length; delete c.likes;
-            });
-            if (mode === 'poll' && newComments.length > 0) {
-                state.comments.unshift(...newComments.reverse());
-            } else if (mode === 'full') {
-                state.comments = newComments; state.loading = false;
-            }
+            state.comments = [];
+            state.loading = false;
             render();
-        } catch (error) { console.error('Error fetching comments:', error); state.loading = false; render(); }
+            return;
+        }
+
+        const payload = { track_id: state.trackId };
+
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `${SUPABASE_URL}/functions/v1/get-thread`,
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+            data: JSON.stringify(payload),
+            onload: function(response) {
+                let newComments = [];
+                if (response.status === 200) {
+                    const responseData = JSON.parse(response.responseText);
+                    const backendComments = responseData.comments || [];
+
+                    newComments = backendComments.map(comment => {
+                        const likes_count = comment.reactions.length;
+                        const user_liked = comment.reactions.some(reaction => reaction.tidal_user_id === state.userId);
+
+                        // FIXED: Use actual user data instead of placeholders.
+                        return {
+                            id: comment.id,
+                            user_id: comment.tidal_user_id,
+                            user_name: formatUserId(comment.tidal_user_id), // Use the formatted ID as the name
+                            avatar_url: comment.avatar_url, // Preserve the fetched avatar URL
+                            content: comment.body,
+                            playback_time: comment.timestamp_seconds,
+                            created_at: comment.created_at,
+                            likes_count: likes_count,
+                            user_liked: user_liked,
+                        };
+                    });
+                } else if (response.status !== 404) {
+                    console.error('Error fetching comments:', response);
+                }
+
+                if (mode === 'poll' && newComments.length > 0) {
+                    state.comments = newComments;
+                } else if (mode === 'full') {
+                    state.comments = newComments;
+                }
+                state.loading = false;
+                render();
+            },
+            onerror: function(error) {
+                console.error('Error fetching comments:', error);
+                state.loading = false;
+                render();
+            }
+        });
     }
 
     async function postComment(content, parentId = null) {
-        if (!state.trackId || !content) return;
-        const newComment = {
-            track_id: state.trackId, user_id: state.userId, user_name: 'TIDAL User',
-            content, parent_id: parentId, playback_time: parentId ? null : Math.floor(state.currentTime),
+        // --- 1. Initial validation: ensure we have necessary data ---
+        if (!state.trackId || !content) {
+            console.error("postComment called without trackId or content.");
+            return;
+        }
+
+        // --- 2. Construct the payload to match the Edge Function's requirements ---
+        const payload = {
+            tidal_user_id: state.userId,
+            track_id: state.trackId,
+            body: content, // The Edge Function expects the key 'body'
+            timestamp_seconds: Math.floor(state.currentTime)
         };
-        try {
-            const [posted] = await supabaseRequest('POST', 'comments', newComment);
-            posted.user_liked = false; posted.likes_count = 0;
-            state.comments.unshift(posted);
-            state.replyingTo = null;
-            render();
-        } catch (error) { console.error('Error posting comment:', error); }
+
+        // Note: The provided 'add-comment' Edge Function does not handle replies ('parentId').
+        // This implementation will only post top-level comments.
+        if (parentId) {
+            console.warn("Replying is not supported by the 'add-comment' function yet. Posting as a top-level comment.");
+        }
+
+        // --- 3. Call the Edge Function using GM_xmlhttpRequest ---
+        // UI state like spinners and disabled buttons are no longer handled here.
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `${SUPABASE_URL}/functions/v1/add-comment`,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            data: JSON.stringify(payload),
+            onload: function(response) {
+                // --- 4. Handle the response from the server ---
+                if (response.status === 201) { // 201 Created: Success!
+                    const newCommentFromServer = JSON.parse(response.responseText);
+
+                    // Map the response to the format your UI expects.
+                    const commentForUI = {
+                        id: newCommentFromServer.id,
+                        user_id: newCommentFromServer.tidal_user_id,
+                        user_name: 'TIDAL User',
+                        content: newCommentFromServer.body,
+                        playback_time: newCommentFromServer.timestamp_seconds,
+                        created_at: newCommentFromServer.created_at,
+                    };
+
+                    // Add the new comment to the state and re-render the UI.
+                    // It does not touch the input field's value or state directly.
+                    state.comments.unshift(commentForUI);
+                    render();
+
+                } else {
+                    // Handle errors (e.g., 400 Bad Request, 502 Server Error)
+                    const errorResponse = JSON.parse(response.responseText || '{}');
+                    console.error('Failed to post comment:', response.status, errorResponse.error);
+                    alert(`Error: Could not post comment. ${errorResponse.error || 'Please try again.'}`);
+                }
+            },
+            onerror: function(error) {
+                // Handle network-level errors
+                console.error('Network error while posting comment:', error);
+                alert('A network error occurred. Please check your connection and try again.');
+            },
+            ontimeout: function() {
+                console.error('Request to post comment timed out.');
+                alert('The request timed out. Please try again.');
+            },
+            onabort: function() {
+                console.log('Request to post comment was aborted.');
+            }
+            // The 'finally' block has been removed as it was only used for UI state management.
+        });
     }
 
-    async function toggleLike(commentId) {
+   async function toggleLike(commentId) {
         const comment = state.comments.find(c => c.id == commentId);
         if (!comment) return;
+
+        // The emoji we will use to represent a "like". This can be changed.
+        const LIKE_EMOJI = '👍';
+
         const currentlyLiked = comment.user_liked;
+
+        // --- 1. Optimistic UI Update ---
+        // Immediately update the UI for a responsive feel, assuming success.
         comment.user_liked = !currentlyLiked;
         comment.likes_count += currentlyLiked ? -1 : 1;
-        renderComment(comment);
+        renderComment(comment); // Re-render just this one comment for efficiency
+
         try {
-            if (currentlyLiked) await supabaseRequest('DELETE', `likes?comment_id=eq.${commentId}&user_id=eq.${state.userId}`);
-            else await supabaseRequest('POST', 'likes', { comment_id: commentId, user_id: state.userId });
+            const payload = {
+                tidal_user_id: state.userId,
+                comment_id: commentId,
+                emoji: LIKE_EMOJI
+            };
+
+            // --- 2. Call the Correct Backend Function ---
+            if (currentlyLiked) {
+                // If it was liked, we need to REMOVE the reaction.
+                await new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: 'POST', // Your backend uses POST for removal
+                        url: `${SUPABASE_URL}/functions/v1/remove-comment-reaction`,
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+                        data: JSON.stringify(payload),
+                        // Success is 200 OK. A 404 means it was already gone, which is also a success state.
+                        onload: res => (res.status === 200 || res.status === 404 ? resolve(res) : reject(res)),
+                        onerror: reject
+                    });
+                });
+            } else {
+                // If it was not liked, we need to ADD the reaction.
+                await new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: 'POST',
+                        url: `${SUPABASE_URL}/functions/v1/add-comment-reaction`,
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+                        data: JSON.stringify(payload),
+                        // Success is 201 Created. A 409 means it already exists, which is also a success state.
+                        onload: res => (res.status === 201 || res.status === 409 ? resolve(res) : reject(res)),
+                        onerror: reject
+                    });
+                });
+            }
         } catch (error) {
+            // --- 3. Revert UI on Failure ---
+            // If the network request fails, undo the optimistic update to show the true state.
             console.error('Error toggling like:', error);
-            comment.user_liked = currentlyLiked;
-            comment.likes_count += currentlyLiked ? 1 : -1;
-            renderComment(comment);
+            comment.user_liked = currentlyLiked; // Revert to the original liked state
+            comment.likes_count += currentlyLiked ? 1 : -1; // Revert the count
+            renderComment(comment); // Re-render the comment to show the reverted state
+            alert('Could not update reaction. Please try again.');
         }
     }
 
@@ -268,30 +440,32 @@
     }
 
     function createCommentElement(comment) {
-        const item = document.createElement('div');
-        item.className = 'social-comment-item _container_aab70e3';
-        item.dataset.id = comment.id;
-        item.innerHTML = `
-            <div class="social-comment-avatar-container _cellContainer_182d240">
-                <img src="${AVATAR_URL}" class="_cellImage_0ef8dd3" />
-            </div>
-            <div class="social-comment-body _titleArtistGroup_41b8765">
-                <div class="social-comment-author-line wave-text-description-demi">
-                    <span>${comment.user_name}</span>
-                    <span class="wave-text-capital-demi" style="color: var(--wave-color-text-tertiary);">${formatRelativeTime(comment.created_at)}</span>
-                </div>
-                <div class="social-comment-text">
-                    ${comment.content.replace(/\n/g, '<br>')}
-                    ${comment.playback_time > 0 ? `<span class="comment-playback-time" data-action="seek" data-time="${comment.playback_time}" title="Jump to time"> @${formatTime(comment.playback_time)}</span>` : ''}
-                </div>
-            </div>
-            <div class="social-comment-actions _actions_3b2b8f9">
-                <button class="social-action-button ${comment.user_liked ? 'liked' : ''}" data-action="like" data-id="${comment.id}" title="Like">
-                     <svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"></path></svg>
-                </button>
-            </div>`;
-        return item;
-    }
+          const item = document.createElement('div');
+          item.className = 'social-comment-item _container_aab70e3';
+          item.dataset.id = comment.id;
+          item.innerHTML = `
+              <div class="social-comment-avatar-container _cellContainer_182d240">
+                  <!-- FIXED: Use the comment's specific avatar_url, with a fallback to the generic one -->
+                  <img src="${comment.avatar_url || AVATAR_URL}" class="_cellImage_0ef8dd3" />
+              </div>
+              <div class="social-comment-body _titleArtistGroup_41b8765">
+                  <div class="social-comment-author-line wave-text-description-demi">
+                      <!-- This will now display the formatted user ID -->
+                      <span>${comment.user_name}</span>
+                      <span class="wave-text-capital-demi" style="color: var(--wave-color-text-tertiary);">${formatRelativeTime(comment.created_at)}</span>
+                  </div>
+                  <div class="social-comment-text">
+                      ${comment.content.replace(/\n/g, '<br>')}
+                      ${comment.playback_time > 0 ? `<span class="comment-playback-time" data-action="seek" data-time="${comment.playback_time}" title="Jump to time"> @${formatTime(comment.playback_time)}</span>` : ''}
+                  </div>
+              </div>
+              <div class="social-comment-actions _actions_3b2b8f9">
+                  <button class="social-action-button ${comment.user_liked ? 'liked' : ''}" data-action="like" data-id="${comment.id}" title="Like">
+                       <svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"></path></svg>
+                  </button>
+              </div>`;
+          return item;
+      }
 
     function render() {
         if (!commentsSidebar) return;
