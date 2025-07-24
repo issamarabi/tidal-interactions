@@ -155,6 +155,8 @@
     // --- STATE MANAGEMENT ---
     let state = {
         isOpen: false, comments: [], loading: true, trackId: null, currentTime: 0,
+        // add a sortMode for comment section; sorting happens on backend, so just need to pass the argument
+        sortMode: 'most_engagement', // default sort mode
         replyingTo: null,
         userId: GM_getValue('social-overlay-user-id') || `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     };
@@ -216,7 +218,10 @@
     };
 
     // --- CORE LOGIC ---
-    async function fetchComments(mode = 'full') {
+    // MODIFIED: Accepts options, but now also reads from the global state for sorting.
+    async function fetchComments(options = {}) {
+        const { mode = 'full', threadStartsAt = null } = options;
+
         if (!state.trackId) {
             state.comments = [];
             state.loading = false;
@@ -224,7 +229,20 @@
             return;
         }
 
-        const payload = { track_id: state.trackId };
+        const payload = {
+            track_id: state.trackId
+        };
+
+        // This is the core logic for the new feature.
+        if (state.sortMode === 'timestamp') {
+            // In timestamp mode, we always use the threadStartsAt filter.
+            // If one wasn't provided (e.g., initial load), use the current song time.
+            payload.thread_starts_at_seconds = (threadStartsAt !== null) ? threadStartsAt : Math.floor(state.currentTime);
+        } else {
+            // For all other modes, pass the selected sort_by parameter.
+            payload.sort_by = state.sortMode;
+        }
+
 
         GM_xmlhttpRequest({
             method: 'POST',
@@ -410,34 +428,44 @@
     }
 
     // --- UI RENDERING ---
-    function createSidebar() {
-        if (document.getElementById('social-comments-sidebar')) return document.getElementById('social-comments-sidebar');
-        const el = document.createElement('aside');
-        el.id = 'social-comments-sidebar';
-        el.className = '_container_b3e8f28';
-        el.innerHTML = `
-            <div class="social-comments-header _header_f4bacf5">
-                <span class="social-comments-title _title_776ac91">Comments</span>
-                <button class="social-action-button" title="Close" data-action="close">
-                     <svg class="_icon_77f3f89" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-                </button>
-            </div>
-            <div class="social-comments-list-container _playQueueItems_84488b2"></div>
-            <div class="social-input-area">
-                <div class="social-input-wrapper">
-                    <textarea class="social-input-field" placeholder="Add a comment..." rows="1"></textarea>
-                    <button class="social-send-btn" disabled title="Send" data-action="send">
-                        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-                    </button>
+    // MODIFIED: The header now includes the dropdown menu.
+        function createSidebar() {
+            if (document.getElementById('social-comments-sidebar')) return document.getElementById('social-comments-sidebar');
+            const el = document.createElement('aside');
+            el.id = 'social-comments-sidebar';
+            el.className = '_container_b3e8f28';
+            el.innerHTML = `
+                <div class="social-comments-header _header_f4bacf5">
+                    <span class="social-comments-title _title_776ac91">Comments</span>
+                    <div class="social-header-controls">
+                        <select id="social-sort-mode" class="social-sort-select">
+                            <option value="most_engagement">Most Engaging</option>
+                            <option value="latest">Latest</option>
+                            <option value="earliest">Earliest</option>
+                            <option value="most_reactions">Most Reactions</option>
+                            <option value="most_replies">Most Replies</option>
+                            <option value="timestamp">Live Timestamp</option>
+                        </select>
+                        <button class="social-action-button" title="Close" data-action="close">
+                            <svg class="_icon_77f3f89" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        </button>
+                    </div>
                 </div>
-            </div>`;
-        document.body.appendChild(el);
-        el.addEventListener('click', handleSidebarClick);
-        const input = el.querySelector('.social-input-field');
-        input.addEventListener('input', () => { el.querySelector('.social-send-btn').disabled = !input.value.trim(); input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; });
-        input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendButton.click(); }});
-        return el;
-    }
+                <div class="social-comments-list-container _playQueueItems_84488b2"></div>
+                    <div class="social-input-area">
+                        <div class="social-input-wrapper">
+                            <textarea class="social-input-field" placeholder="Add a comment..." rows="1"></textarea>
+                            <button class="social-send-btn" disabled title="Send" data-action="send">
+                                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                            </button>
+                    </div>`;
+                document.body.appendChild(el);
+                el.addEventListener('click', handleSidebarClick);
+                const input = el.querySelector('.social-input-field');
+                input.addEventListener('input', () => { el.querySelector('.social-send-btn').disabled = !input.value.trim(); input.style.height = 'auto'; input.style.height = `${input.scrollHeight}px`; });
+                input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendButton.click(); }});
+                return el;
+            }
 
     function createCommentElement(comment) {
           const item = document.createElement('div');
@@ -496,12 +524,16 @@
     }
 
     // --- EVENT HANDLERS ---
+    // MODIFIED: The 'seek' action is now much simpler.
     function handleSidebarClick(e) {
         const target = e.target.closest('[data-action]');
         if (!target) return;
         const { action, id, time } = target.dataset;
         switch (action) {
-            case 'close': state.isOpen = false; render(); break;
+            case 'close':
+                state.isOpen = false;
+                render();
+                break;
             case 'send':
                 const content = commentInput.value.trim();
                 if (content) {
@@ -509,8 +541,14 @@
                     commentInput.value = ''; commentInput.style.height = 'auto'; sendButton.disabled = true;
                 }
                 break;
-            case 'like': toggleLike(id); break;
-            case 'seek': document.querySelector('audio, video')?.fastSeek(parseFloat(time)); break;
+            case 'like':
+                toggleLike(id);
+                break;
+            case 'seek':
+                // The only job of clicking a timestamp now is to seek the player.
+                // The 'Live Timestamp' mode will handle the filtering automatically.
+                document.querySelector('audio, video')?.fastSeek(parseFloat(time));
+                break;
         }
     }
 
@@ -549,6 +587,19 @@
         commentInput = commentsSidebar.querySelector('.social-input-field');
         sendButton = commentsSidebar.querySelector('.social-send-btn');
 
+            // MODIFIED: Add an event listener for our new dropdown menu.
+        const sortDropdown = document.getElementById('social-sort-mode');
+        if (sortDropdown) {
+            sortDropdown.value = state.sortMode; // Set initial value
+            sortDropdown.addEventListener('change', (e) => {
+                state.sortMode = e.target.value;
+                state.loading = true;
+                render();
+                // When sort mode changes, always do a full fetch.
+                fetchComments({ mode: 'full' });
+            });
+        }
+
         playQueueButton?.addEventListener('click', () => {
             if (state.isOpen) { state.isOpen = false; render(); }
         });
@@ -557,34 +608,39 @@
     }
 
     // --- TRACKING & POLLING ---
+    // MODIFIED: This is the heart of the new feature.
     let lastTrackId = null;
     setInterval(() => {
         if (!document.querySelector('.social-comments-button')) init();
+
+        // Update current time regardless of mode
+        state.currentTime = document.querySelector('audio, video')?.currentTime || 0;
+
+        // --- Real-time fetching for "Live Timestamp" mode ---
+        const currentSecond = Math.floor(state.currentTime);
+        if (state.isOpen && state.trackId && state.sortMode === 'timestamp' && currentSecond !== state.lastFetchedSecond) {
+            state.lastFetchedSecond = currentSecond;
+            // We don't need to show a big loading spinner for these rapid updates.
+            // The fetch will just replace the content when it arrives.
+            fetchComments({ threadStartsAt: currentSecond });
+        }
+
+        // --- Polling for track changes (less frequent) ---
         const urlMatch = window.location.pathname.match(/track\/(\d+)/);
         const newTrackId = urlMatch ? urlMatch[1] : null;
-        state.currentTime = document.querySelector('audio, video')?.currentTime || 0;
         if (newTrackId !== lastTrackId) {
             lastTrackId = newTrackId;
             state.trackId = newTrackId;
             state.loading = true;
             state.comments = [];
-            if (state.isOpen) fetchComments('full');
-            else render();
+            state.lastFetchedSecond = -1; // Reset for the new track
+            if (state.isOpen) {
+                // Fetch using the currently selected sort mode.
+                fetchComments({ mode: 'full' });
+            } else {
+                render();
+            }
         }
-    }, 1000);
-
-    setInterval(() => {
-        if (state.isOpen && state.trackId && !state.loading) {
-            fetchComments('poll');
-        }
-    }, 5000);
-
-    const observer = new MutationObserver(() => {
-        if (document.querySelector('._moreContainer_f6162c8, [data-test="player-controls-right"]')) {
-            init();
-            observer.disconnect();
-        }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    }, 250); // Poll more frequently (4 times a second) for smoother timestamp updates.
 
 })();
