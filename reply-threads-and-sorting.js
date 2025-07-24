@@ -301,16 +301,31 @@
     async function toggleLike(commentId) {
         // Find comment in main list or replies
         let comment = state.comments.find(c => c.id == commentId);
+        let isReply = false;
+        
         if (!comment) {
+            // Search in replies
             for (const parent of state.comments) {
                 comment = parent.replies.find(r => r.id == commentId);
-                if (comment) break;
+                if (comment) {
+                    isReply = true;
+                    break;
+                }
             }
         }
         if (!comment) return;
 
         const currentlyLiked = comment.user_liked;
-        const endpoint = currentlyLiked ? 'remove-comment-reaction' : 'add-comment-reaction';
+        
+        // Determine which endpoints to use based on whether it's a reply
+        let addEndpoint, removeEndpoint;
+        if (isReply) {
+            addEndpoint = 'add-reply-reaction';
+            removeEndpoint = 'remove-reply-reaction'; // Assuming this exists
+        } else {
+            addEndpoint = 'add-comment-reaction';
+            removeEndpoint = 'remove-comment-reaction';
+        }
 
         // Optimistic UI update
         comment.user_liked = !currentlyLiked;
@@ -318,18 +333,35 @@
         renderComment(comment);
 
         try {
+            const payload = {
+                tidal_user_id: state.userId,
+                comment_id: commentId,
+                emoji: LIKE_EMOJI
+            };
+
+            const endpoint = currentlyLiked ? removeEndpoint : addEndpoint;
+
             await new Promise((resolve, reject) => {
                 GM_xmlhttpRequest({
                     method: 'POST',
                     url: `${SUPABASE_URL}/functions/v1/${endpoint}`,
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-                    data: JSON.stringify({ tidal_user_id: state.userId, comment_id: commentId, emoji: LIKE_EMOJI }),
-                    onload: res => (res.status >= 200 && res.status < 300) ? resolve(res) : reject(res),
+                    data: JSON.stringify(payload),
+                    onload: res => {
+                        // Success status codes
+                        if (currentlyLiked) {
+                            // Removing reaction: 200 OK or 404 (already gone) are both success
+                            (res.status === 200 || res.status === 404) ? resolve(res) : reject(res);
+                        } else {
+                            // Adding reaction: 201 Created or 409 (already exists) are both success
+                            (res.status === 201 || res.status === 409) ? resolve(res) : reject(res);
+                        }
+                    },
                     onerror: reject
                 });
             });
         } catch (error) {
-            console.error('Error toggling like:', error);
+            console.error(`Error toggling like on ${isReply ? 'reply' : 'comment'}:`, error);
             // Revert on failure
             comment.user_liked = currentlyLiked;
             comment.likes_count += currentlyLiked ? 1 : -1;
