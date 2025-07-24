@@ -249,17 +249,32 @@
         if (!state.trackId || !content) return;
         sendButton.disabled = true;
 
-        const payload = {
-            tidal_user_id: state.userId,
-            track_id: state.trackId,
-            body: content,
-            timestamp_seconds: Math.floor(state.currentTime),
-            ...(parentId && { parent_id: parentId })
-        };
+        const isReply = parentId !== null;
+        
+        let endpoint, payload;
+        
+        if (isReply) {
+            // Use add-reply endpoint for replies
+            endpoint = 'add-reply';
+            payload = {
+                tidal_user_id: state.userId,
+                parent_comment_id: parentId,  // UUID of the comment being replied to
+                body: content                 // reply text (no timestamp needed for replies)
+            };
+        } else {
+            // Use add-comment endpoint for top-level comments
+            endpoint = 'add-comment';
+            payload = {
+                tidal_user_id: state.userId,
+                track_id: state.trackId,
+                body: content,
+                timestamp_seconds: Math.floor(state.currentTime)
+            };
+        }
 
         GM_xmlhttpRequest({
             method: 'POST',
-            url: `${SUPABASE_URL}/functions/v1/add-comment`,
+            url: `${SUPABASE_URL}/functions/v1/${endpoint}`,
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
             data: JSON.stringify(payload),
             onload: function(response) {
@@ -270,13 +285,13 @@
                     fetchComments({ mode: 'poll' });
                 } else {
                     const errorResponse = JSON.parse(response.responseText || '{}');
-                    console.error('Failed to post comment:', response.status, errorResponse.error);
-                    alert(`Error: Could not post comment. ${errorResponse.error || 'Please try again.'}`);
+                    console.error(`Failed to post ${isReply ? 'reply' : 'comment'}:`, response.status, errorResponse.error);
+                    alert(`Error: Could not post ${isReply ? 'reply' : 'comment'}. ${errorResponse.error || 'Please try again.'}`);
                     sendButton.disabled = !commentInput.value.trim();
                 }
             },
             onerror: function(error) {
-                console.error('Network error while posting comment:', error);
+                console.error(`Network error while posting ${isReply ? 'reply' : 'comment'}:`, error);
                 alert('A network error occurred. Please check your connection and try again.');
                 sendButton.disabled = !commentInput.value.trim();
             }
