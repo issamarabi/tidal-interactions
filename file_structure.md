@@ -50,5 +50,3 @@
     │       └── index.ts
     └── migrations
         └── 00000_initial_schema.sql
-
-20 directories, 33 files
