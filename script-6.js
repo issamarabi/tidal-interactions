@@ -199,9 +199,15 @@ let lastKnownReplyId = null;
     function formatRelativeTime(dateString) {
         const diff = (new Date() - new Date(dateString)) / 1000;
         if (diff < 60) return `now`;
-        if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-        if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-        return `${Math.floor(diff / 86400)}d`;
+        
+        const minutes = Math.floor(diff / 60);
+        if (minutes < 60) return `${minutes}m`;
+        
+        const hours = Math.floor(diff / 3600);
+        if (hours < 24) return `${hours}h`;
+        
+        const days = Math.floor(diff / 86400);
+        return `${days}d`;
     }
     function formatUserId(id) {
         if (!id) return 'User';
