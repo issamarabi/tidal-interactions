@@ -13,6 +13,8 @@
 // @connect      hqfqeqrptwrnxqoifemu.supabase.co
 // @run-at       document-end
 // ==/UserScript==
+let lastKnownCommentId = null;
+let lastKnownReplyId = null;
 
 (function() {
     'use strict';
@@ -263,6 +265,32 @@
                 console.error('Error fetching comments:', error);
                 state.loading = false;
                 render();
+            }
+        });
+
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `${SUPABASE_URL}/functions/v1/check-update-ts`,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            data: JSON.stringify({ track_id: state.trackId }),
+            onload: function (res) {
+                if (res.status === 200) {
+                    try {
+                        const { latest_comment_id, latest_reply_id } = JSON.parse(res.responseText);
+                        lastKnownCommentId = latest_comment_id ?? null;
+                        lastKnownReplyId = latest_reply_id ?? null;
+                    } catch (err) {
+                        console.error('Error parsing check-updates response:', err);
+                    }
+                } else {
+                    console.error('check-updates failed after fetchComments', res);
+                }
+            },
+            onerror: function (err) {
+                console.error('Network error calling check-updates:', err);
             }
         });
     }
@@ -791,11 +819,54 @@ setInterval(() => {
 }, 250);
 
 
+    // setInterval(() => {
+    //     if (state.isOpen && state.trackId && !state.loading && state.sortMode !== 'timestamp') {
+    //         fetchComments({ mode: 'poll' });
+    //     }
+    // }, 5000);
+
     setInterval(() => {
-        if (state.isOpen && state.trackId && !state.loading && state.sortMode !== 'timestamp') {
-            fetchComments({ mode: 'poll' });
-        }
+        if (!state.isOpen || !state.trackId || state.sortMode === 'timestamp') return;
+
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: `${SUPABASE_URL}/functions/v1/check-update-ts`,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            data: JSON.stringify({ track_id: state.trackId }),
+            onload: function (res) {
+                if (res.status === 200) {
+                    try {
+                        const { latest_comment_id, latest_reply_id } = JSON.parse(res.responseText);
+
+                        const commentChanged = latest_comment_id && latest_comment_id !== lastKnownCommentId;
+                        const replyChanged = latest_reply_id && latest_reply_id !== lastKnownReplyId;
+
+                        if (commentChanged || replyChanged) {
+                            lastKnownCommentId = latest_comment_id;
+                            lastKnownReplyId = latest_reply_id;
+                            fetchComments({ mode: 'poll' });
+                        }
+                    } catch (err) {
+                        console.error('Error parsing update check response:', err);
+                    }
+                } else {
+                    console.error('Failed to check for updates:', {
+                        status: res.status,
+                        statusText: res.statusText,
+                        responseText: res.responseText,
+                    });
+                }
+            },
+            onerror: function (err) {
+                console.error('Network error while polling for updates:', err);
+            }
+        });
     }, 5000);
+
+
 
     const observer = new MutationObserver(() => {
         if (document.querySelector('._moreContainer_f6162c8, [data-test="player-controls-right"]')) {
