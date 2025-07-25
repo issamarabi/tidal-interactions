@@ -691,8 +691,8 @@ let lastKnownReplyId = null;
             case 'seek':
                 const t = parseFloat(time);
                 const media = document.querySelector('video');
-                media.currentTime = t;
-                media.dispatchEvent(new Event('pause'));
+                media.currentTime = t
+                media.dispatchEvent(new Event('pause'))
                 break;
             case 'reply':
                 state.replyingTo = { id, name };
