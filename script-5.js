@@ -689,7 +689,10 @@ let lastKnownReplyId = null;
                 toggleLike(id);
                 break;
             case 'seek':
-                document.querySelector('audio, video')?.fastSeek(parseFloat(time));
+                const t = parseFloat(time);
+                const media = document.querySelector('video');
+                media.currentTime = t;
+                media.dispatchEvent(new Event('pause'));
                 break;
             case 'reply':
                 state.replyingTo = { id, name };
