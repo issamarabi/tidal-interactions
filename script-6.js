@@ -186,6 +186,7 @@ let lastKnownReplyId = null;
         lastFetchedSecond: -1,
         replyingTo: null, // { id: commentId, name: userName }
         userId: GM_getValue('social-overlay-user-id') || `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        registered: false,
         // MODIFICATION: Add cache for all comments when in "Live Timestamp" mode
         allTimestampComments: [],
     };
@@ -308,7 +309,43 @@ let lastKnownReplyId = null;
         });
     }
 
+    // --- USER REGISTRATION ---
+    function registerUserOnce() {
+        // if we’ve already registered in this session, skip
+        if (state.userRegistered) return Promise.resolve();
+  
+        return new Promise(resolve => {
+          GM_xmlhttpRequest({
+            method: 'POST',
+            url: `${SUPABASE_URL}/functions/v1/add-user`,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            data: JSON.stringify({
+              tidal_user_id: state.userId,
+              avatar_url: null
+            }),
+            onload: res => {
+              if (res.status === 200 || res.status === 201) {
+                state.userRegistered = true;
+                console.log('[SC] userRegistered → true');
+              } else {
+                console.warn('[SC] add-user returned', res.status);
+              }
+              resolve();
+            },
+            onerror: err => {
+              console.error('[SC] add-user network error', err);
+              resolve();
+            }
+          });
+        });
+      }
+
     async function postComment(content, parentId = null) {
+        await registerUserOnce();
+
         if (!state.trackId || !content) return;
         sendButton.disabled = true;
 
