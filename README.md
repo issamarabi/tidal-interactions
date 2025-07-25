@@ -2,6 +2,9 @@
 A dynamic social layer where users can post timestamped comments and reactions on any song.
 Supports likes, threaded replies, emoji reactions, sorting by engagement, and real-time listening party mode.
 
+# **Usage**
+Upload the userscript TIDAL_Interactions.js into a userscript manager browser extension (such as Violentmonkey) and navigate to the TIDAL webpage.
+
 # 🚀 Overview
 tidal-interactions adds a real-time community conversation and reaction experience for music listeners.
 Users can leave timestamped comments, react with emoji, and reply to each other on any song. Comments and threads can be sorted by engagement, recency, or reply count.
